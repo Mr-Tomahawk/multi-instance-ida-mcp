@@ -4,9 +4,7 @@ import functools
 import os
 import sys
 import time
-from enum import IntEnum
 import idaapi
-import ida_kernwin
 import idc
 from .rpc import McpToolError
 from .zeromcp.jsonrpc import get_current_cancel_event, RequestCancelledError

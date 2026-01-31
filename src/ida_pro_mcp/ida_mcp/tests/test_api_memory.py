@@ -3,20 +3,12 @@
 # Import test framework from parent
 from ..framework import (
     test,
-    assert_valid_address,
     assert_has_keys,
-    assert_non_empty,
     assert_is_list,
-    assert_all_have_keys,
-    get_any_function,
     get_any_string,
     get_first_segment,
-    get_n_functions,
-    get_n_strings,
     get_data_address,
     get_unmapped_address,
-    get_functions_with_calls,
-    get_functions_with_callers,
 )
 
 # Import functions under test
@@ -26,11 +18,9 @@ from ..api_memory import (
     get_string,
     get_global_value,
     patch,
-    put_int,
 )
 
 # Import sync module for IDAError
-from ..sync import IDAError
 
 
 # ============================================================================

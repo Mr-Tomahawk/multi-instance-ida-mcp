@@ -17,8 +17,6 @@ from .utils import (
     get_type_by_name,
     parse_decls_ctypes,
     my_modifier_t,
-    StructureMember,
-    StructureDefinition,
     StructRead,
     TypeEdit,
 )

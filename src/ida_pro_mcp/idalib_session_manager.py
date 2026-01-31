@@ -4,7 +4,6 @@ This module provides session management for multiple IDA databases in idalib mod
 Each session represents an opened binary with its own IDA database instance.
 """
 
-import os
 import uuid
 import threading
 import logging

@@ -1,7 +1,6 @@
 from itertools import islice
 import struct
 from typing import Annotated, Optional
-import ida_hexrays
 import ida_lines
 import ida_funcs
 import idaapi
@@ -10,7 +9,6 @@ import ida_typeinf
 import ida_nalt
 import ida_bytes
 import ida_ida
-import ida_entry
 import ida_idaapi
 import ida_xref
 import ida_ua
@@ -27,13 +25,11 @@ from .utils import (
     get_assembly_lines,
     get_all_xrefs,
     get_all_comments,
-    Function,
     Argument,
     DisassemblyFunction,
     Xref,
     BasicBlock,
     StructFieldQuery,
-    InsnPattern,
 )
 
 # ============================================================================

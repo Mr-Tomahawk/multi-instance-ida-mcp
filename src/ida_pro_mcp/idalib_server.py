@@ -6,7 +6,6 @@ from pathlib import Path
 
 # idapro must go first to initialize idalib
 import idapro
-import ida_auto
 
 from ida_pro_mcp.ida_mcp import MCP_SERVER
 

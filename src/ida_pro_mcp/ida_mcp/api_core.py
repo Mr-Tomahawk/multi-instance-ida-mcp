@@ -2,14 +2,11 @@
 
 import re
 import time
-from typing import Annotated, Optional
+from typing import Annotated
 
-import ida_hexrays
 import idaapi
 import idautils
 import ida_nalt
-import ida_typeinf
-import ida_segment
 
 from .rpc import tool
 from .sync import idasync
@@ -41,25 +38,19 @@ def init_caches():
 
 
 from .utils import (
-    Metadata,
     Function,
     ConvertedNumber,
     Global,
     Import,
-    String,
-    Segment,
     Page,
     NumberConversion,
     ListQuery,
-    get_image_size,
-    parse_address,
     normalize_list_input,
     normalize_dict_list,
     get_function,
     paginate,
     pattern_filter,
 )
-from .sync import IDAError
 
 
 # ============================================================================
