@@ -10,7 +10,7 @@ import ida_frame
 import idaapi
 
 from .rpc import tool
-from .sync import idasync
+from .sync import idasync, idaread
 from .utils import (
     normalize_list_input,
     normalize_dict_list,
@@ -28,7 +28,7 @@ from .utils import (
 
 
 @tool
-@idasync
+@idaread
 def stack_frame(addrs: Annotated[list[str] | str, "Address(es)"]) -> list[dict]:
     """Get stack vars"""
     addrs = normalize_list_input(addrs)

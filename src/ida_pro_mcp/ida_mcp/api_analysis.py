@@ -15,7 +15,7 @@ import ida_ua
 import ida_name
 import ida_idp
 from .rpc import tool
-from .sync import idasync, tool_timeout
+from .sync import idaread, tool_timeout
 from .utils import (
     parse_address,
     normalize_list_input,
@@ -151,7 +151,7 @@ def _resolve_immediate_insn_start(
 
 
 @tool
-@idasync
+@idaread
 @tool_timeout(90.0)
 def decompile(
     addr: Annotated[str, "Function address to decompile"],
@@ -168,7 +168,7 @@ def decompile(
 
 
 @tool
-@idasync
+@idaread
 @tool_timeout(90.0)
 def disasm(
     addr: Annotated[str, "Function address to disassemble"],
@@ -313,7 +313,7 @@ def disasm(
 
 
 @tool
-@idasync
+@idaread
 def xrefs_to(
     addrs: Annotated[list[str] | str, "Addresses to find cross-references to"],
     limit: Annotated[int, "Max xrefs per address (default: 100, max: 1000)"] = 100,
@@ -349,7 +349,7 @@ def xrefs_to(
 
 
 @tool
-@idasync
+@idaread
 def xrefs_to_field(queries: list[StructFieldQuery] | StructFieldQuery) -> list[dict]:
     """Get cross-references to structure fields"""
     if isinstance(queries, dict):
@@ -441,7 +441,7 @@ def xrefs_to_field(queries: list[StructFieldQuery] | StructFieldQuery) -> list[d
 
 
 @tool
-@idasync
+@idaread
 def callees(
     addrs: Annotated[list[str] | str, "Function addresses to get callees for"],
     limit: Annotated[int, "Max callees per function (default: 200, max: 500)"] = 200,
@@ -524,7 +524,7 @@ def callees(
 
 
 @tool
-@idasync
+@idaread
 def find_bytes(
     patterns: Annotated[
         list[str] | str, "Byte patterns to search for (e.g. '48 8B ?? ??')"
@@ -601,7 +601,7 @@ def find_bytes(
 
 
 @tool
-@idasync
+@idaread
 def basic_blocks(
     addrs: Annotated[list[str] | str, "Function addresses to get basic blocks for"],
     max_blocks: Annotated[
@@ -682,7 +682,7 @@ def basic_blocks(
 
 
 @tool
-@idasync
+@idaread
 def find(
     type: Annotated[
         str, "Search type: 'string', 'immediate', 'data_ref', or 'code_ref'"
@@ -1079,7 +1079,7 @@ def _scan_insn_ranges(
 
 
 @tool
-@idasync
+@idaread
 def export_funcs(
     addrs: Annotated[list[str] | str, "Function addresses to export"],
     format: Annotated[
@@ -1143,7 +1143,7 @@ def export_funcs(
 
 
 @tool
-@idasync
+@idaread
 def callgraph(
     roots: Annotated[
         list[str] | str, "Root function addresses to start call graph traversal from"

@@ -4,7 +4,9 @@ import json
 import shutil
 import argparse
 import http.client
+import queue as _queue
 import tempfile
+import socket
 import traceback
 import tomllib
 import tomli_w
@@ -24,38 +26,348 @@ else:
 
 IDA_HOST = "127.0.0.1"
 IDA_PORT = 13337
+DISCOVERY_DIR = os.path.join(os.path.expanduser("~"), ".ida-mcp", "instances")
+_cached_instances: list[dict] | None = None
+_DEFAULT_TIMEOUT = 120
+_SLOW_TIMEOUT = 900
+_SLOW_TOOLS = frozenset({
+    "decompile", "analyze_funcs", "callgraph", "find_paths",
+    "export_funcs", "py_eval", "basic_blocks", "find_bytes",
+    "find_insns", "find_insn_operands", "search", "analyze_strings",
+    "disasm", "xref_matrix",
+})
+_conn_pool: dict[int, _queue.SimpleQueue] = {}
+
+
+def _acquire_conn(port: int, timeout: int) -> http.client.HTTPConnection:
+    q = _conn_pool.setdefault(port, _queue.SimpleQueue())
+    try:
+        conn = q.get_nowait()
+        conn.timeout = timeout
+        return conn
+    except Exception:
+        return http.client.HTTPConnection(IDA_HOST, port, timeout=timeout)
+
+
+def _release_conn(port: int, conn: http.client.HTTPConnection):
+    try:
+        _conn_pool.setdefault(port, _queue.SimpleQueue()).put_nowait(conn)
+    except Exception:
+        conn.close()
+
+
+def _timeout_for_tool(tool_name: str) -> int:
+    return _SLOW_TIMEOUT if tool_name in _SLOW_TOOLS else _DEFAULT_TIMEOUT
 
 mcp = McpServer("ida-pro-mcp")
 dispatch_original = mcp.registry.dispatch
+LOCAL_TOOLS = {}
+
+
+def discover_instances(force_refresh: bool = False) -> list[dict]:
+    """Scan discovery dir for active IDA instances. Uses cache unless force_refresh=True."""
+    global _cached_instances
+    if not force_refresh and _cached_instances is not None:
+        return _cached_instances
+
+    instances = []
+    if not os.path.isdir(DISCOVERY_DIR):
+        _cached_instances = instances
+        return instances
+
+    for fname in sorted(os.listdir(DISCOVERY_DIR)):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(DISCOVERY_DIR, fname)
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                info = json.load(f)
+            os.kill(info["pid"], 0)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            try:
+                result = sock.connect_ex(("127.0.0.1", info["port"]))
+            finally:
+                sock.close()
+            if result == 0:
+                instances.append(info)
+            else:
+                os.unlink(fpath)
+        except (ProcessLookupError, OSError, json.JSONDecodeError, KeyError):
+            try:
+                os.unlink(fpath)
+            except OSError:
+                pass
+    _cached_instances = instances
+    return instances
+
+
+def resolve_instance(instance: str = "auto") -> int:
+    """Resolve an instance identifier to a port number."""
+    instances = discover_instances()
+    if not instances:
+        # Legacy fallback for direct --ida-rpc usage without discovery files.
+        if instance == "auto":
+            return IDA_PORT
+        try:
+            if int(instance) == IDA_PORT:
+                return IDA_PORT
+        except (ValueError, TypeError):
+            pass
+        raise ConnectionError(
+            "No IDA instances found. Open IDA, load a binary, and click Edit -> Plugins -> MCP."
+        )
+
+    if instance == "auto":
+        if len(instances) == 1:
+            return instances[0]["port"]
+        names = [f'"{i.get("binary_name", "<unknown>")}" (port {i["port"]})' for i in instances]
+        raise ValueError(
+            f"Multiple IDA instances running: {', '.join(names)}. "
+            f"Specify which instance to use by binary name."
+        )
+
+    instance_lower = str(instance).lower()
+    matches = [
+        i for i in instances if instance_lower in str(i.get("binary_name", "")).lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]["port"]
+    if len(matches) > 1:
+        names = [f'"{m.get("binary_name", "<unknown>")}"' for m in matches]
+        raise ValueError(f"Ambiguous instance '{instance}', matches: {', '.join(names)}")
+
+    try:
+        port = int(instance)
+        if any(i["port"] == port for i in instances):
+            return port
+    except (ValueError, TypeError):
+        pass
+
+    raise ValueError(
+        f"Instance '{instance}' not found. Use list_instances() to see running instances."
+    )
+
+
+def jsonrpc_call(port: int, method: str, params: dict) -> dict:
+    """Make a JSON-RPC tools/call request to a specific IDA instance."""
+    request = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {"name": method, "arguments": params},
+        "id": 1,
+    }
+    conn = _acquire_conn(port, _DEFAULT_TIMEOUT)
+    should_pool = True
+    try:
+        conn.request("POST", "/mcp", json.dumps(request), {"Content-Type": "application/json"})
+        response = conn.getresponse()
+        data = json.loads(response.read().decode())
+        if "error" in data:
+            raise RuntimeError(data["error"].get("message", "Unknown error"))
+        result = data.get("result", {})
+        if "structuredContent" in result:
+            return result["structuredContent"]
+        return result
+    except Exception:
+        should_pool = False
+        conn.close()
+        raise
+    finally:
+        if should_pool:
+            try:
+                _release_conn(port, conn)
+            except Exception:
+                conn.close()
+
+
+def register_local_tool(name, handler, description, input_schema):
+    """Register a local tool handled in server.py."""
+    LOCAL_TOOLS[name] = (
+        handler,
+        {
+            "name": name,
+            "description": description,
+            "inputSchema": input_schema,
+        },
+    )
+
+
+def _default_port() -> int:
+    """Get a default target port for non-tools methods."""
+    instances = discover_instances()
+    if instances:
+        return instances[0]["port"]
+    return IDA_PORT
 
 
 def dispatch_proxy(request: dict | str | bytes | bytearray) -> JsonRpcResponse | None:
-    """Dispatch JSON-RPC requests to the MCP server registry"""
+    """Dispatch JSON-RPC requests to local handlers or proxied IDA instances."""
     if not isinstance(request, dict):
         request_obj: JsonRpcRequest = json.loads(request)
     else:
         request_obj: JsonRpcRequest = request  # type: ignore
 
-    if request_obj["method"] == "initialize":
+    method = request_obj["method"]
+    if method == "initialize":
         return dispatch_original(request)
-    elif request_obj["method"].startswith("notifications/"):
+    if method.startswith("notifications/"):
         return dispatch_original(request)
+    if method == "tools/list":
+        return _handle_tools_list(request_obj)
+    if method == "tools/call":
+        return _handle_tools_call(request_obj)
 
-    conn = http.client.HTTPConnection(IDA_HOST, IDA_PORT, timeout=30)
+    return _forward_to_ida_port(request, _default_port())
+
+
+def _handle_tools_list(request_obj: JsonRpcRequest) -> JsonRpcResponse:
+    """Get tools from IDA, inject instance parameter, add local tools."""
+    instances = discover_instances()
+    if instances:
+        ida_response = _forward_to_ida_port(request_obj, instances[0]["port"])
+    else:
+        # Direct fallback keeps --ida-rpc behavior working when discovery is unavailable.
+        ida_response = _forward_to_ida_port(request_obj, IDA_PORT)
+        if not isinstance(ida_response, dict) or "error" in ida_response:
+            ida_response = {
+                "jsonrpc": "2.0",
+                "result": {"tools": []},
+                "id": request_obj.get("id"),
+            }
+    return _build_tools_list_response(request_obj, ida_response)
+
+
+def _build_tools_list_response(
+    request_obj: JsonRpcRequest, ida_response: JsonRpcResponse | dict
+) -> JsonRpcResponse:
+    """Inject instance parameter into IDA tools and append local tools."""
+    result = {}
+    if isinstance(ida_response, dict):
+        result = dict(ida_response.get("result", {}) or {})
+    tools = list(result.get("tools", []) or [])
+
+    instance_param_schema = {
+        "type": "string",
+        "description": (
+            "Target IDA instance: binary name, port number, or 'auto' "
+            "(default: auto-selects if only one instance is running). "
+            "Use list_instances() to see available instances."
+        ),
+    }
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        schema = dict(tool.get("inputSchema", {}) or {})
+        if "type" not in schema:
+            schema["type"] = "object"
+        props = dict(schema.get("properties", {}) or {})
+        props["instance"] = instance_param_schema
+        schema["properties"] = props
+        tool["inputSchema"] = schema
+
+    for _name, (_handler, schema) in LOCAL_TOOLS.items():
+        tools.append(schema)
+
+    result["tools"] = tools
+    return JsonRpcResponse(
+        {
+            "jsonrpc": "2.0",
+            "result": result,
+            "id": request_obj.get("id"),
+        }
+    )
+
+
+def _handle_tools_call(request_obj: JsonRpcRequest) -> JsonRpcResponse:
+    """Route tools/call requests to local tools or a resolved IDA instance."""
+    params = request_obj.get("params", {}) or {}
+    tool_name = params.get("name", "")
+    arguments = dict(params.get("arguments", {}) or {})
+
+    if tool_name in LOCAL_TOOLS:
+        handler, _schema = LOCAL_TOOLS[tool_name]
+        try:
+            result = handler(**arguments)
+            return JsonRpcResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
+                        "structuredContent": (
+                            result if isinstance(result, dict) else {"result": result}
+                        ),
+                        "isError": False,
+                    },
+                    "id": request_obj.get("id"),
+                }
+            )
+        except Exception as e:
+            return JsonRpcResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "result": {
+                        "content": [{"type": "text", "text": str(e)}],
+                        "isError": True,
+                    },
+                    "id": request_obj.get("id"),
+                }
+            )
+
+    instance = arguments.pop("instance", "auto")
     try:
-        if isinstance(request, dict):
-            request = json.dumps(request)
-        elif isinstance(request, str):
-            request = request.encode("utf-8")
-        conn.request("POST", "/mcp", request, {"Content-Type": "application/json"})
+        port = resolve_instance(instance)
+    except (ConnectionError, ValueError) as e:
+        return JsonRpcResponse(
+            {
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [{"type": "text", "text": str(e)}],
+                    "isError": True,
+                },
+                "id": request_obj.get("id"),
+            }
+        )
+
+    modified_request = dict(request_obj)
+    modified_params = {"name": tool_name, "arguments": arguments}
+    if "_meta" in params:
+        modified_params["_meta"] = params["_meta"]
+    modified_request["params"] = modified_params
+    return _forward_to_ida_port(modified_request, port, timeout=_timeout_for_tool(tool_name))
+
+
+def _forward_to_ida_port(
+    request_obj: dict | str | bytes | bytearray, port: int, timeout: int = _DEFAULT_TIMEOUT
+) -> JsonRpcResponse | None:
+    """Forward a raw JSON-RPC request to a specific IDA instance port."""
+    request_id = None
+    if isinstance(request_obj, dict):
+        request_id = request_obj.get("id")
+    else:
+        try:
+            parsed = json.loads(request_obj)
+            if isinstance(parsed, dict):
+                request_id = parsed.get("id")
+        except Exception:
+            request_id = None
+
+    conn = _acquire_conn(port, timeout)
+    should_pool = True
+    try:
+        body = json.dumps(request_obj) if isinstance(request_obj, dict) else request_obj
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        conn.request("POST", "/mcp", body, {"Content-Type": "application/json"})
         response = conn.getresponse()
         data = response.read().decode()
         return json.loads(data)
     except Exception as e:
+        should_pool = False
+        conn.close()
         full_info = traceback.format_exc()
-        id = request_obj.get("id")
-        if id is None:
-            return None  # Notification, no response needed
+        if request_id is None:
+            return None
 
         if sys.platform == "darwin":
             shortcut = "Ctrl+Option+M"
@@ -66,15 +378,61 @@ def dispatch_proxy(request: dict | str | bytes | bytearray) -> JsonRpcResponse |
                 "jsonrpc": "2.0",
                 "error": {
                     "code": -32000,
-                    "message": f"Failed to connect to IDA Pro! Did you run Edit -> Plugins -> MCP ({shortcut}) to start the server?\n{full_info}",
+                    "message": (
+                        f"Failed to connect to IDA Pro on port {port}! "
+                        f"Did you run Edit -> Plugins -> MCP ({shortcut}) to start the server?\n"
+                        f"{full_info}"
+                    ),
                     "data": str(e),
                 },
-                "id": id,
+                "id": request_id,
             }
         )
     finally:
-        conn.close()
+        if should_pool:
+            try:
+                _release_conn(port, conn)
+            except Exception:
+                conn.close()
 
+
+def _list_instances() -> dict:
+    """List connected IDA Pro instances discovered via local JSON files."""
+    instances = discover_instances(force_refresh=True)
+    if not instances:
+        return {
+            "instances": [],
+            "message": (
+                "No IDA instances found. Open IDA, load a binary, and click Edit -> Plugins -> MCP."
+            ),
+        }
+    return {
+        "instances": [
+            {
+                "binary_name": i.get("binary_name"),
+                "port": i.get("port"),
+                "idb_path": i.get("idb_path"),
+                "bits": i.get("bits"),
+            }
+            for i in instances
+        ]
+    }
+
+
+register_local_tool(
+    "list_instances",
+    _list_instances,
+    "List all connected IDA Pro instances.\n\n"
+    "Returns info about each running IDA instance including binary name, "
+    "port, IDB path, and architecture. Use the binary_name as the "
+    "'instance' parameter in other tools to target a specific instance.\n\n"
+    "When only one instance is running, all tools auto-target it.",
+    {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+)
 
 mcp.registry.dispatch = dispatch_proxy
 
@@ -902,6 +1260,10 @@ def main():
     if args.config:
         print_mcp_config()
         return
+
+    # Auto-repair plugin symlinks on every startup (handles editable ↔ regular
+    # install transitions without requiring the user to re-run --install)
+    install_ida_plugin(quiet=True, allow_ida_free=True)
 
     try:
         if args.transport == "stdio":

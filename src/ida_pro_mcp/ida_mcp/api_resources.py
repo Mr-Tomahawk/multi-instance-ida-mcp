@@ -15,7 +15,7 @@ import idautils
 import idc
 
 from .rpc import resource
-from .sync import idasync
+from .sync import idaread
 from .utils import (
     Metadata,
     Segment,
@@ -32,7 +32,7 @@ from .utils import (
 
 
 @resource("ida://idb/metadata")
-@idasync
+@idaread
 def idb_metadata_resource() -> Metadata:
     """Get IDB file metadata (path, arch, base address, size, hashes)"""
     import hashlib
@@ -68,7 +68,7 @@ def idb_metadata_resource() -> Metadata:
 
 
 @resource("ida://idb/segments")
-@idasync
+@idaread
 def idb_segments_resource() -> list[Segment]:
     """Get all memory segments with permissions"""
     segments = []
@@ -96,7 +96,7 @@ def idb_segments_resource() -> list[Segment]:
 
 
 @resource("ida://idb/entrypoints")
-@idasync
+@idaread
 def idb_entrypoints_resource() -> list[dict]:
     """Get entry points (main, TLS callbacks, etc.)"""
     entrypoints = []
@@ -115,7 +115,7 @@ def idb_entrypoints_resource() -> list[dict]:
 
 
 @resource("ida://cursor")
-@idasync
+@idaread
 def cursor_resource() -> dict:
     """Get current cursor position and function"""
     import ida_kernwin
@@ -139,7 +139,7 @@ def cursor_resource() -> dict:
 
 
 @resource("ida://selection")
-@idasync
+@idaread
 def selection_resource() -> dict:
     """Get current selection range (if any)"""
     import ida_kernwin
@@ -156,7 +156,7 @@ def selection_resource() -> dict:
 
 
 @resource("ida://types")
-@idasync
+@idaread
 def types_resource() -> list[dict]:
     """Get all local types"""
     types = []
@@ -169,7 +169,7 @@ def types_resource() -> list[dict]:
 
 
 @resource("ida://structs")
-@idasync
+@idaread
 def structs_resource() -> list[dict]:
     """Get all structures/unions"""
     structs = []
@@ -192,7 +192,7 @@ def structs_resource() -> list[dict]:
 
 
 @resource("ida://struct/{name}")
-@idasync
+@idaread
 def struct_name_resource(name: Annotated[str, "Structure name"]) -> dict:
     """Get structure definition with fields"""
     tif = ida_typeinf.tinfo_t()
@@ -226,7 +226,7 @@ def struct_name_resource(name: Annotated[str, "Structure name"]) -> dict:
 
 
 @resource("ida://import/{name}")
-@idasync
+@idaread
 def import_name_resource(name: Annotated[str, "Import name"]) -> dict:
     """Get specific import details by name"""
     nimps = ida_nalt.get_import_module_qty()
@@ -255,7 +255,7 @@ def import_name_resource(name: Annotated[str, "Import name"]) -> dict:
 
 
 @resource("ida://export/{name}")
-@idasync
+@idaread
 def export_name_resource(name: Annotated[str, "Export name"]) -> dict:
     """Get specific export details by name"""
     entry_count = ida_nalt.get_entry_qty()
@@ -280,7 +280,7 @@ def export_name_resource(name: Annotated[str, "Export name"]) -> dict:
 
 
 @resource("ida://xrefs/from/{addr}")
-@idasync
+@idaread
 def xrefs_from_resource(addr: Annotated[str, "Source address"]) -> list[dict]:
     """Get cross-references from address"""
     ea = parse_address(addr)

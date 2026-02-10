@@ -1,9 +1,9 @@
 import logging
-import queue
 import functools
 import os
 import sys
 import time
+import threading
 import idaapi
 import idc
 from .rpc import McpToolError
@@ -14,6 +14,11 @@ from .zeromcp.jsonrpc import get_current_cancel_event, RequestCancelledError
 # ============================================================================
 
 ida_major, ida_minor = map(int, idaapi.get_kernel_version().split("."))
+
+if (ida_major > 9) or (ida_major == 9 and ida_minor >= 2):
+    from PySide6.QtCore import QObject, QEvent, QCoreApplication
+else:
+    from PyQt5.QtCore import QObject, QEvent, QCoreApplication
 
 
 class IDAError(McpToolError):
@@ -35,6 +40,40 @@ class CancelledError(RequestCancelledError):
     pass
 
 
+# ============================================================================
+# Qt-based main-thread dispatch
+# ============================================================================
+
+class _FuncEvent(QEvent):
+    TYPE = QEvent.Type(QEvent.registerEventType())
+    __slots__ = ("func", "result", "done")
+
+    def __init__(self, func, result, done):
+        super().__init__(self.TYPE)
+        self.func = func
+        self.result = result
+        self.done = done
+
+
+class _Dispatcher(QObject):
+    def event(self, e):
+        if isinstance(e, _FuncEvent):
+            old_batch = idc.batch(1)
+            try:
+                e.result["value"] = e.func()
+            except Exception as exc:
+                e.result["exc"] = exc
+            finally:
+                idc.batch(old_batch)
+            e.done.set()
+            return True
+        return super().event(e)
+
+
+# Created at import time (on the main thread during plugin load).
+_dispatcher = _Dispatcher()
+
+
 logger = logging.getLogger(__name__)
 _TOOL_TIMEOUT_ENV = "IDA_MCP_TOOL_TIMEOUT_SEC"
 _DEFAULT_TOOL_TIMEOUT_SEC = 15.0
@@ -50,36 +89,30 @@ def _get_tool_timeout_seconds() -> float:
         return _DEFAULT_TOOL_TIMEOUT_SEC
 
 
-call_stack = queue.LifoQueue()
-
-
-def _sync_wrapper(ff):
-    """Call a function ff with a specific IDA safety_mode."""
-
-    res_container = queue.Queue()
-
-    def runned():
-        if not call_stack.empty():
-            last_func_name = call_stack.get()
-            error_str = f"Call stack is not empty while calling the function {ff.__name__} from {last_func_name}"
-            raise IDASyncError(error_str)
-
-        call_stack.put((ff.__name__))
-        # Enable batch mode for all synchronized operations
+def _sync_wrapper(ff, mode=None):
+    """Call ff on IDA's main thread via Qt event dispatch."""
+    # Main thread: call directly.
+    if idaapi.is_main_thread():
         old_batch = idc.batch(1)
         try:
-            res_container.put(ff())
-        except Exception as x:
-            res_container.put(x)
+            return ff()
         finally:
             idc.batch(old_batch)
-            call_stack.get()
 
-    idaapi.execute_sync(runned, idaapi.MFF_WRITE)
-    res = res_container.get()
-    if isinstance(res, Exception):
-        raise res
-    return res
+    # Worker thread: post to Qt event loop, block until done.
+    result: dict[str, object] = {}
+    done = threading.Event()
+    QCoreApplication.postEvent(_dispatcher, _FuncEvent(ff, result, done))
+    done.wait()
+
+    if "exc" in result:
+        raise result["exc"]
+    return result.get("value")
+
+
+def _sync_wrapper_read(ff):
+    """Like _sync_wrapper but uses MFF_READ for concurrent read access."""
+    return _sync_wrapper(ff, mode=idaapi.MFF_READ)
 
 
 def _normalize_timeout(value: object) -> float | None:
@@ -91,7 +124,7 @@ def _normalize_timeout(value: object) -> float | None:
         return None
 
 
-def sync_wrapper(ff, timeout_override: float | None = None):
+def sync_wrapper(ff, timeout_override: float | None = None, mode=None):
     """Wrapper to enable timeout and cancellation during IDA synchronization.
 
     Note: Batch mode is now handled in _sync_wrapper to ensure it's always
@@ -125,17 +158,44 @@ def sync_wrapper(ff, timeout_override: float | None = None):
                 sys.setprofile(old_profile)
 
         timed_ff.__name__ = ff.__name__
-        return _sync_wrapper(timed_ff)
-    return _sync_wrapper(ff)
+        return _sync_wrapper(timed_ff, mode=mode)
+    return _sync_wrapper(ff, mode=mode)
+
+
+def sync_wrapper_read(ff, timeout_override: float | None = None):
+    """Read-mode wrapper to enable timeout and cancellation during synchronization."""
+    cancel_event = get_current_cancel_event()
+
+    timeout = timeout_override
+    if timeout is None:
+        timeout = _get_tool_timeout_seconds()
+    if timeout > 0 or cancel_event is not None:
+
+        def timed_ff():
+            deadline = time.monotonic() + timeout if timeout > 0 else None
+
+            def profilefunc(frame, event, arg):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise CancelledError("Request was cancelled")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise IDASyncError(f"Tool timed out after {timeout:.2f}s")
+
+            old_profile = sys.getprofile()
+            sys.setprofile(profilefunc)
+            try:
+                return ff()
+            finally:
+                sys.setprofile(old_profile)
+
+        timed_ff.__name__ = ff.__name__
+        return _sync_wrapper_read(timed_ff)
+    return _sync_wrapper_read(ff)
 
 
 def idasync(f):
     """Run the function on the IDA main thread in write mode.
 
-    This is the unified decorator for all IDA synchronization.
-    Previously there were separate @idaread and @idawrite decorators,
-    but since read-only operations in IDA might actually require write
-    access (e.g., decompilation), we now use a single decorator.
+    Use for tools that modify IDA state.
     """
 
     @functools.wraps(f)
@@ -146,6 +206,25 @@ def idasync(f):
             getattr(f, "__ida_mcp_timeout_sec__", None)
         )
         return sync_wrapper(ff, timeout_override)
+
+    return wrapper
+
+
+def idaread(f):
+    """Run the function on the IDA main thread in READ mode.
+
+    Allows concurrent execution with other idaread-decorated functions.
+    Use for tools that only read IDA state.
+    """
+
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        ff = functools.partial(f, *args, **kwargs)
+        ff.__name__ = f.__name__
+        timeout_override = _normalize_timeout(
+            getattr(f, "__ida_mcp_timeout_sec__", None)
+        )
+        return sync_wrapper_read(ff, timeout_override)
 
     return wrapper
 

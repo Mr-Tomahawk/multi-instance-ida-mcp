@@ -9,7 +9,7 @@ import ida_ida
 import idaapi
 
 from .rpc import tool
-from .sync import idasync, ida_major
+from .sync import idasync, idaread, ida_major
 from .utils import (
     normalize_list_input,
     normalize_dict_list,
@@ -60,7 +60,7 @@ def declare_type(
 
 
 @tool
-@idasync
+@idaread
 def read_struct(queries: list[StructRead] | StructRead) -> list[dict]:
     """Reads struct type definition and parses actual memory values at the
     given address as instances of that struct type.
@@ -223,7 +223,7 @@ def read_struct(queries: list[StructRead] | StructRead) -> list[dict]:
 
 
 @tool
-@idasync
+@idaread
 def search_structs(
     filter: Annotated[
         str, "Case-insensitive substring to search for in structure names"
@@ -400,7 +400,7 @@ def set_type(edits: list[TypeEdit] | TypeEdit) -> list[dict]:
 
 
 @tool
-@idasync
+@idaread
 def infer_types(
     addrs: Annotated[list[str] | str, "Addresses to infer types for"],
 ) -> list[dict]:

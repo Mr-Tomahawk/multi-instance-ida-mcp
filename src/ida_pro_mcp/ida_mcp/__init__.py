@@ -6,7 +6,7 @@ enabling AI assistants to interact with IDA's disassembler and decompiler.
 Architecture:
 - rpc.py: JSON-RPC infrastructure and registry
 - mcp.py: MCP protocol server (HTTP/SSE)
-- sync.py: IDA synchronization decorator (@idasync)
+- sync.py: IDA synchronization decorators (@idasync, @idaread)
 - utils.py: Shared helpers and TypedDict definitions
 - api_*.py: Modular API implementations (71 tools + 24 resources)
 """
@@ -28,9 +28,9 @@ from . import api_python
 from . import api_resources
 
 # Re-export key components for external use
-from .sync import idasync, IDAError, IDASyncError, CancelledError
+from .sync import idasync, idaread, IDAError, IDASyncError, CancelledError
 from .rpc import MCP_SERVER, MCP_UNSAFE, tool, unsafe, resource
-from .http import IdaMcpHttpRequestHandler
+from .http import IdaMcpHttpRequestHandler, init_http
 from .api_core import init_caches
 
 __all__ = [
@@ -50,6 +50,7 @@ __all__ = [
     "api_resources",
     # Re-exported components
     "idasync",
+    "idaread",
     "IDAError",
     "IDASyncError",
     "CancelledError",
@@ -59,5 +60,6 @@ __all__ = [
     "unsafe",
     "resource",
     "IdaMcpHttpRequestHandler",
+    "init_http",
     "init_caches",
 ]

@@ -1,4 +1,69 @@
-# IDA Pro MCP
+# Multi-Instance IDA MCP
+
+A fork of [mrexodia/ida-pro-mcp](https://github.com/mrexodia/ida-pro-mcp) that adds **multi-instance support** — run multiple IDA Pro instances simultaneously with zero configuration, automatic port discovery, and intelligent routing.
+
+## What's New
+
+### Multi-Instance Support
+
+Open multiple IDA instances, click MCP in each, and they all just work. No config changes needed.
+
+- **Auto-port discovery** — instances bind to ports 13337-13342 automatically, no conflicts
+- **Zero-config routing** — the MCP server discovers all running instances via `~/.ida-mcp/instances/*.json`
+- **Instance targeting** — every tool gets an `instance` parameter: use binary name, port, or `"auto"`
+- **Stale cleanup** — dead instances are detected via PID liveness checks and removed automatically
+- **Backward compatible** — single-instance users notice nothing different
+
+```
+AI: list_instances()
+-> [{"binary_name": "firmware_v1.elf", "port": 13337},
+    {"binary_name": "firmware_v2.elf", "port": 13338}]
+
+AI: decompile(addr="0x401000", instance="firmware_v1.elf")
+AI: decompile(addr="0x401000", instance="firmware_v2.elf")
+```
+
+### IDA 9.0 Thread Synchronization Fix
+
+`idaapi.execute_sync()` silently fails from HTTP worker threads in IDA 9.0 — the callback never runs. This fork replaces it with Qt event dispatch (`QCoreApplication.postEvent` to a `QObject` on the main thread), which works reliably across IDA 9.0 (PyQt5) and IDA 9.2+ (PySide6).
+
+### Performance Improvements
+
+- **HTTP connection pooling** — reuses connections to IDA instances instead of opening a new one per request
+- **Tool-aware timeouts** — slow tools (decompile, callgraph, etc.) get 15min timeout, fast tools get 2min
+- **Cached CORS policy** — avoids re-reading config JSON on every HTTP request
+- **Deferred initialization** — `http.py` module no longer triggers IDA SDK calls at import time
+
+## Installation
+
+```sh
+pip uninstall ida-pro-mcp
+pip install https://github.com/Mr-Tomahawk/multi-instance-ida-mcp/archive/refs/heads/main.zip
+ida-pro-mcp --install
+```
+
+Restart IDA and your MCP client. Then in each IDA instance, click **Edit > Plugins > MCP**.
+
+## Changed Files
+
+| File | Change |
+|------|--------|
+| `server.py` | Multi-instance proxy: discovery, routing, connection pooling, local tools |
+| `ida_mcp.py` | Auto-port binding (13337-13342), discovery file write/cleanup |
+| `sync.py` | Qt-based main-thread dispatch replacing broken `execute_sync()` |
+| `http.py` | Cached CORS policy, deferred init via `init_http()` |
+| `api_*.py` | Minor fixes (batch mode, import guards, error handling) |
+| `zeromcp/mcp.py` | Small transport fixes |
+
+---
+
+# Original README
+
+> Everything below is from the upstream project by [@mrexodia](https://github.com/mrexodia). All credit for the core IDA Pro MCP server goes to him.
+
+---
+
+## IDA Pro MCP
 
 Simple [MCP Server](https://modelcontextprotocol.io/introduction) to allow vibe reversing in IDA Pro.
 

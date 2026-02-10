@@ -61,6 +61,7 @@ class _McpSseConnection:
 
 class McpHttpRequestHandler(BaseHTTPRequestHandler):
     server_version = "zeromcp/1.3.0"
+    protocol_version = "HTTP/1.1"
     error_message_format = "%(code)d - %(message)s"
     error_content_type = "text/plain"
 
@@ -154,7 +155,8 @@ class McpHttpRequestHandler(BaseHTTPRequestHandler):
     def _handle_sse_get(self):
         # Create SSE connection wrapper
         conn = _McpSseConnection(self.wfile)
-        self.mcp_server._sse_connections[conn.session_id] = conn
+        with self.mcp_server._sse_lock:
+            self.mcp_server._sse_connections[conn.session_id] = conn
 
         try:
             # Send SSE headers
@@ -180,8 +182,9 @@ class McpHttpRequestHandler(BaseHTTPRequestHandler):
 
         finally:
             conn.alive = False
-            if conn.session_id in self.mcp_server._sse_connections:
-                del self.mcp_server._sse_connections[conn.session_id]
+            with self.mcp_server._sse_lock:
+                if conn.session_id in self.mcp_server._sse_connections:
+                    del self.mcp_server._sse_connections[conn.session_id]
 
     def _handle_sse_post(self, body: bytes):
         query_params = parse_qs(urlparse(self.path).query)
@@ -200,7 +203,8 @@ class McpHttpRequestHandler(BaseHTTPRequestHandler):
 
         # Send SSE response if necessary
         if response is not None:
-            sse_conn = self.mcp_server._sse_connections.get(session_id)
+            with self.mcp_server._sse_lock:
+                sse_conn = self.mcp_server._sse_connections.get(session_id)
             if sse_conn is None or not sse_conn.alive:
                 # No SSE connection found
                 self.send_error(400, f"No active SSE connection found for session {session_id}")
@@ -254,6 +258,7 @@ class McpServer:
         self._server_thread: threading.Thread | None = None
         self._running = False
         self._sse_connections: dict[str, _McpSseConnection] = {}
+        self._sse_lock = threading.RLock()
         self._protocol_version = threading.local()
         self._enabled_extensions = threading.local()  # set[str] per request
         self._extensions_registry = extensions if extensions is not None else {}  # group -> set of tool names
@@ -341,9 +346,10 @@ class McpServer:
         self._running = False
 
         # Close all SSE connections
-        for conn in self._sse_connections.values():
-            conn.alive = False
-        self._sse_connections.clear()
+        with self._sse_lock:
+            for conn in self._sse_connections.values():
+                conn.alive = False
+            self._sse_connections.clear()
 
         # Shutdown the HTTP server
         if self._http_server:

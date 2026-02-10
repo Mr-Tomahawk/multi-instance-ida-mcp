@@ -11,7 +11,7 @@ import ida_bytes
 import idaapi
 
 from .rpc import tool
-from .sync import idasync
+from .sync import idasync, idaread
 from .utils import (
     IntRead,
     IntWrite,
@@ -28,7 +28,7 @@ from .utils import (
 
 
 @tool
-@idasync
+@idaread
 def get_bytes(regions: list[MemoryRead] | MemoryRead) -> list[dict]:
     """Read bytes from memory addresses"""
     if isinstance(regions, dict):
@@ -86,7 +86,7 @@ def _parse_int_value(text: str, signed: bool, bits: int) -> int:
 
 
 @tool
-@idasync
+@idaread
 def get_int(
     queries: Annotated[
         list[IntRead] | IntRead,
@@ -121,7 +121,7 @@ def get_int(
 
 
 @tool
-@idasync
+@idaread
 def get_string(
     addrs: Annotated[list[str] | str, "Addresses to read strings from"],
 ) -> list[dict]:
@@ -182,7 +182,7 @@ def get_global_variable_value_internal(ea: int) -> str:
 
 
 @tool
-@idasync
+@idaread
 def get_global_value(
     queries: Annotated[
         list[str] | str, "Global variable addresses or names to read values from"

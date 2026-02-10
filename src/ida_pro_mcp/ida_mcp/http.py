@@ -68,8 +68,8 @@ DEFAULT_CORS_POLICY = "local"
 
 
 def get_cors_policy(port: int) -> str:
-    """Retrieve the current CORS policy from configuration."""
-    match config_json_get("cors_policy", DEFAULT_CORS_POLICY):
+    """Retrieve the current CORS policy from cached configuration."""
+    match _cors_policy_cache:
         case "unrestricted":
             return "*"
         case "local":
@@ -80,22 +80,36 @@ def get_cors_policy(port: int) -> str:
             return "*"
 
 
-ORIGINAL_TOOLS = handle_enabled_tools(MCP_SERVER.tools, "enabled_tools")
+ORIGINAL_TOOLS = None
+_cors_policy_cache = DEFAULT_CORS_POLICY
+
+
+def _apply_cors_policy(server, cors_policy: str) -> None:
+    match cors_policy:
+        case "unrestricted":
+            server.cors_allowed_origins = "*"
+        case "local":
+            server.cors_allowed_origins = server.cors_localhost
+        case "direct":
+            server.cors_allowed_origins = None
+        case _:
+            server.cors_allowed_origins = "*"
+
+
+def init_http():
+    """Initialize HTTP config. Must be called after import, not at module level."""
+    global ORIGINAL_TOOLS, _cors_policy_cache
+    ORIGINAL_TOOLS = handle_enabled_tools(MCP_SERVER.tools, "enabled_tools")
+    _cors_policy_cache = config_json_get("cors_policy", DEFAULT_CORS_POLICY)
+    _apply_cors_policy(MCP_SERVER, _cors_policy_cache)
 
 
 class IdaMcpHttpRequestHandler(McpHttpRequestHandler):
     def __init__(self, request, client_address, server):
         super().__init__(request, client_address, server)
-        self.update_cors_policy()
 
     def update_cors_policy(self):
-        match config_json_get("cors_policy", DEFAULT_CORS_POLICY):
-            case "unrestricted":
-                self.mcp_server.cors_allowed_origins = "*"
-            case "local":
-                self.mcp_server.cors_allowed_origins = self.mcp_server.cors_localhost
-            case "direct":
-                self.mcp_server.cors_allowed_origins = None
+        _apply_cors_policy(self.mcp_server, _cors_policy_cache)
 
     def do_POST(self):
         """Handles POST requests."""
@@ -211,7 +225,7 @@ class IdaMcpHttpRequestHandler(McpHttpRequestHandler):
 
     def _handle_config_get(self):
         """Sends the configuration page with checkboxes."""
-        cors_policy = config_json_get("cors_policy", DEFAULT_CORS_POLICY)
+        cors_policy = _cors_policy_cache
 
         body = """<html>
 <head>
@@ -374,8 +388,10 @@ input[type="submit"]:hover {
         postvars = parse_qs(self.rfile.read(length).decode("utf-8"))
 
         # Update CORS policy
+        global _cors_policy_cache
         cors_policy = postvars.get("cors_policy", [DEFAULT_CORS_POLICY])[0]
         config_json_set("cors_policy", cors_policy)
+        _cors_policy_cache = cors_policy
         self.update_cors_policy()
 
         # Update the server's tools

@@ -9,7 +9,7 @@ import idautils
 import ida_nalt
 
 from .rpc import tool
-from .sync import idasync
+from .sync import idaread
 
 # Cached strings list: [(ea, text), ...]
 _strings_cache: list[tuple[int, str]] | None = None
@@ -80,7 +80,7 @@ def _parse_func_query(query: str) -> int:
 
 
 @tool
-@idasync
+@idaread
 def lookup_funcs(
     queries: Annotated[list[str] | str, "Address(es) or name(s)"],
 ) -> list[dict]:
@@ -192,7 +192,7 @@ def int_convert(
 
 
 @tool
-@idasync
+@idaread
 def list_funcs(
     queries: Annotated[
         list[ListQuery] | ListQuery | str,
@@ -222,7 +222,7 @@ def list_funcs(
 
 
 @tool
-@idasync
+@idaread
 def list_globals(
     queries: Annotated[
         list[ListQuery] | ListQuery | str,
@@ -255,7 +255,7 @@ def list_globals(
 
 
 @tool
-@idasync
+@idaread
 def imports(
     offset: Annotated[int, "Offset"],
     count: Annotated[int, "Count (0=all)"],
@@ -284,7 +284,7 @@ def imports(
 
 
 @tool
-@idasync
+@idaread
 def find_regex(
     pattern: Annotated[str, "Regex pattern to search for in strings"],
     limit: Annotated[int, "Max matches (default: 30, max: 500)"] = 30,

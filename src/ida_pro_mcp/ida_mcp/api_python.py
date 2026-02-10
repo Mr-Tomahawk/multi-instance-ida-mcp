@@ -28,6 +28,71 @@ from .utils import parse_address, get_function
 # ============================================================================
 
 
+def _lazy_import(module_name):
+    try:
+        return __import__(module_name)
+    except Exception:
+        return None
+
+
+_EXEC_GLOBALS_TEMPLATE = {
+    "__builtins__": __builtins__,
+    "idaapi": idaapi,
+    "idc": idc,
+    "idautils": _lazy_import("idautils"),
+    "ida_allins": _lazy_import("ida_allins"),
+    "ida_auto": _lazy_import("ida_auto"),
+    "ida_bitrange": _lazy_import("ida_bitrange"),
+    "ida_bytes": ida_bytes,
+    "ida_dbg": ida_dbg,
+    "ida_dirtree": _lazy_import("ida_dirtree"),
+    "ida_diskio": _lazy_import("ida_diskio"),
+    "ida_entry": ida_entry,
+    "ida_expr": _lazy_import("ida_expr"),
+    "ida_fixup": _lazy_import("ida_fixup"),
+    "ida_fpro": _lazy_import("ida_fpro"),
+    "ida_frame": ida_frame,
+    "ida_funcs": ida_funcs,
+    "ida_gdl": _lazy_import("ida_gdl"),
+    "ida_graph": _lazy_import("ida_graph"),
+    "ida_hexrays": ida_hexrays,
+    "ida_ida": ida_ida,
+    "ida_idd": _lazy_import("ida_idd"),
+    "ida_idp": _lazy_import("ida_idp"),
+    "ida_ieee": _lazy_import("ida_ieee"),
+    "ida_kernwin": ida_kernwin,
+    "ida_libfuncs": _lazy_import("ida_libfuncs"),
+    "ida_lines": ida_lines,
+    "ida_loader": _lazy_import("ida_loader"),
+    "ida_merge": _lazy_import("ida_merge"),
+    "ida_mergemod": _lazy_import("ida_mergemod"),
+    "ida_moves": _lazy_import("ida_moves"),
+    "ida_nalt": ida_nalt,
+    "ida_name": ida_name,
+    "ida_netnode": _lazy_import("ida_netnode"),
+    "ida_offset": _lazy_import("ida_offset"),
+    "ida_pro": _lazy_import("ida_pro"),
+    "ida_problems": _lazy_import("ida_problems"),
+    "ida_range": _lazy_import("ida_range"),
+    "ida_regfinder": _lazy_import("ida_regfinder"),
+    "ida_registry": _lazy_import("ida_registry"),
+    "ida_search": _lazy_import("ida_search"),
+    "ida_segment": ida_segment,
+    "ida_segregs": _lazy_import("ida_segregs"),
+    "ida_srclang": _lazy_import("ida_srclang"),
+    "ida_strlist": _lazy_import("ida_strlist"),
+    "ida_struct": _lazy_import("ida_struct"),
+    "ida_tryblks": _lazy_import("ida_tryblks"),
+    "ida_typeinf": ida_typeinf,
+    "ida_ua": _lazy_import("ida_ua"),
+    "ida_undo": _lazy_import("ida_undo"),
+    "ida_xref": ida_xref,
+    "ida_enum": _lazy_import("ida_enum"),
+    "parse_address": parse_address,
+    "get_function": get_function,
+}
+
+
 @tool
 @idasync
 @unsafe
@@ -48,69 +113,7 @@ def py_eval(
         sys.stdout = stdout_capture
         sys.stderr = stderr_capture
 
-        # Create execution context with IDA modules (lazy import to avoid errors)
-        def lazy_import(module_name):
-            try:
-                return __import__(module_name)
-            except Exception:
-                return None
-
-        exec_globals = {
-            "__builtins__": __builtins__,
-            "idaapi": idaapi,
-            "idc": idc,
-            "idautils": lazy_import("idautils"),
-            "ida_allins": lazy_import("ida_allins"),
-            "ida_auto": lazy_import("ida_auto"),
-            "ida_bitrange": lazy_import("ida_bitrange"),
-            "ida_bytes": ida_bytes,
-            "ida_dbg": ida_dbg,
-            "ida_dirtree": lazy_import("ida_dirtree"),
-            "ida_diskio": lazy_import("ida_diskio"),
-            "ida_entry": ida_entry,
-            "ida_expr": lazy_import("ida_expr"),
-            "ida_fixup": lazy_import("ida_fixup"),
-            "ida_fpro": lazy_import("ida_fpro"),
-            "ida_frame": ida_frame,
-            "ida_funcs": ida_funcs,
-            "ida_gdl": lazy_import("ida_gdl"),
-            "ida_graph": lazy_import("ida_graph"),
-            "ida_hexrays": ida_hexrays,
-            "ida_ida": ida_ida,
-            "ida_idd": lazy_import("ida_idd"),
-            "ida_idp": lazy_import("ida_idp"),
-            "ida_ieee": lazy_import("ida_ieee"),
-            "ida_kernwin": ida_kernwin,
-            "ida_libfuncs": lazy_import("ida_libfuncs"),
-            "ida_lines": ida_lines,
-            "ida_loader": lazy_import("ida_loader"),
-            "ida_merge": lazy_import("ida_merge"),
-            "ida_mergemod": lazy_import("ida_mergemod"),
-            "ida_moves": lazy_import("ida_moves"),
-            "ida_nalt": ida_nalt,
-            "ida_name": ida_name,
-            "ida_netnode": lazy_import("ida_netnode"),
-            "ida_offset": lazy_import("ida_offset"),
-            "ida_pro": lazy_import("ida_pro"),
-            "ida_problems": lazy_import("ida_problems"),
-            "ida_range": lazy_import("ida_range"),
-            "ida_regfinder": lazy_import("ida_regfinder"),
-            "ida_registry": lazy_import("ida_registry"),
-            "ida_search": lazy_import("ida_search"),
-            "ida_segment": ida_segment,
-            "ida_segregs": lazy_import("ida_segregs"),
-            "ida_srclang": lazy_import("ida_srclang"),
-            "ida_strlist": lazy_import("ida_strlist"),
-            "ida_struct": lazy_import("ida_struct"),
-            "ida_tryblks": lazy_import("ida_tryblks"),
-            "ida_typeinf": ida_typeinf,
-            "ida_ua": lazy_import("ida_ua"),
-            "ida_undo": lazy_import("ida_undo"),
-            "ida_xref": ida_xref,
-            "ida_enum": lazy_import("ida_enum"),
-            "parse_address": parse_address,
-            "get_function": get_function,
-        }
+        exec_globals = dict(_EXEC_GLOBALS_TEMPLATE)
 
         result_value = None
         exec_locals = {}
