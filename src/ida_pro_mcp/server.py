@@ -28,7 +28,8 @@ IDA_HOST = "127.0.0.1"
 IDA_PORT = 13337
 DISCOVERY_DIR = os.path.join(os.path.expanduser("~"), ".ida-mcp", "instances")
 _cached_instances: list[dict] | None = None
-_DEFAULT_TIMEOUT = 120
+_MIN_TIMEOUT = 300
+_DEFAULT_TIMEOUT = _MIN_TIMEOUT
 _SLOW_TIMEOUT = 900
 _SLOW_TOOLS = frozenset({
     "decompile", "analyze_funcs", "callgraph", "find_paths",
@@ -39,7 +40,16 @@ _SLOW_TOOLS = frozenset({
 _conn_pool: dict[int, _queue.SimpleQueue] = {}
 
 
+def _normalize_timeout(timeout: int) -> int:
+    try:
+        parsed = int(timeout)
+    except (TypeError, ValueError):
+        return _MIN_TIMEOUT
+    return max(parsed, _MIN_TIMEOUT)
+
+
 def _acquire_conn(port: int, timeout: int) -> http.client.HTTPConnection:
+    timeout = _normalize_timeout(timeout)
     q = _conn_pool.setdefault(port, _queue.SimpleQueue())
     try:
         conn = q.get_nowait()
@@ -57,7 +67,8 @@ def _release_conn(port: int, conn: http.client.HTTPConnection):
 
 
 def _timeout_for_tool(tool_name: str) -> int:
-    return _SLOW_TIMEOUT if tool_name in _SLOW_TOOLS else _DEFAULT_TIMEOUT
+    timeout = _SLOW_TIMEOUT if tool_name in _SLOW_TOOLS else _DEFAULT_TIMEOUT
+    return _normalize_timeout(timeout)
 
 mcp = McpServer("ida-pro-mcp")
 dispatch_original = mcp.registry.dispatch
@@ -352,7 +363,7 @@ def _forward_to_ida_port(
         except Exception:
             request_id = None
 
-    conn = _acquire_conn(port, timeout)
+    conn = _acquire_conn(port, _normalize_timeout(timeout))
     should_pool = True
     try:
         body = json.dumps(request_obj) if isinstance(request_obj, dict) else request_obj

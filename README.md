@@ -30,7 +30,7 @@ AI: decompile(addr="0x401000", instance="firmware_v2.elf")
 ### Performance Improvements
 
 - **HTTP connection pooling** — reuses connections to IDA instances instead of opening a new one per request
-- **Tool-aware timeouts** — slow tools (decompile, callgraph, etc.) get 15min timeout, fast tools get 2min
+- **Tool-aware timeouts** — slow tools (decompile, callgraph, etc.) get 15min timeout, all other tools get at least 5min
 - **Cached CORS policy** — avoids re-reading config JSON on every HTTP request
 - **Deferred initialization** — `http.py` module no longer triggers IDA SDK calls at import time
 

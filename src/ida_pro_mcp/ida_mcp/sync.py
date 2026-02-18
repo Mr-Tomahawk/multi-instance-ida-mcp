@@ -76,7 +76,15 @@ _dispatcher = _Dispatcher()
 
 logger = logging.getLogger(__name__)
 _TOOL_TIMEOUT_ENV = "IDA_MCP_TOOL_TIMEOUT_SEC"
-_DEFAULT_TOOL_TIMEOUT_SEC = 15.0
+_MIN_TOOL_TIMEOUT_SEC = 300.0
+_DEFAULT_TOOL_TIMEOUT_SEC = _MIN_TOOL_TIMEOUT_SEC
+
+
+def _enforce_min_timeout_seconds(timeout: float) -> float:
+    # Preserve explicit "no timeout" behavior (<= 0), but clamp positives.
+    if timeout <= 0:
+        return timeout
+    return max(timeout, _MIN_TOOL_TIMEOUT_SEC)
 
 
 def _get_tool_timeout_seconds() -> float:
@@ -84,7 +92,7 @@ def _get_tool_timeout_seconds() -> float:
     if value == "":
         return _DEFAULT_TOOL_TIMEOUT_SEC
     try:
-        return float(value)
+        return _enforce_min_timeout_seconds(float(value))
     except ValueError:
         return _DEFAULT_TOOL_TIMEOUT_SEC
 
@@ -119,7 +127,7 @@ def _normalize_timeout(value: object) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
+        return _enforce_min_timeout_seconds(float(value))
     except (TypeError, ValueError):
         return None
 
@@ -238,7 +246,7 @@ def tool_timeout(seconds: float):
     Correct order:
         @tool
         @idasync
-        @tool_timeout(90.0)  # innermost
+        @tool_timeout(300.0)  # innermost
         def my_func(...):
     """
 

@@ -152,7 +152,7 @@ def _resolve_immediate_insn_start(
 
 @tool
 @idaread
-@tool_timeout(90.0)
+@tool_timeout(300.0)
 def decompile(
     addr: Annotated[str, "Function address to decompile"],
 ) -> dict:
@@ -169,7 +169,7 @@ def decompile(
 
 @tool
 @idaread
-@tool_timeout(90.0)
+@tool_timeout(300.0)
 def disasm(
     addr: Annotated[str, "Function address to disassemble"],
     max_instructions: Annotated[
